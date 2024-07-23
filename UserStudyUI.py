@@ -116,9 +116,9 @@ class SEMGStudyApp:
         
         self.data_file = open(file_path, "wb")
         number_of_acquired_channels = self.device.GetNumberOfAcquiredChannels()
-        print(number_of_acquired_channels)
+        print("Number of Channels: " + number_of_acquired_channels)
         receive_buffer_buffer_length = FrameLength * number_of_acquired_channels * 4
-        print(receive_buffer_buffer_length)
+        print("Buffer Length: " + receive_buffer_buffer_length)
         receive_buffer = bytearray(receive_buffer_buffer_length)
         
         try:
