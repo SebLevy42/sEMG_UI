@@ -1,206 +1,178 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
-#import UnicornPy
+from tkinter import messagebox
+import UnicornPy
 import numpy as np
 import os
 import datetime
-from threading import Thread
+import threading
+from pylsl import StreamInfo, StreamOutlet
 import time
-import pylsl
 
-class SEMGApp:
+class SEMGStudyApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("sEMG Data Collection")
-
-        self.create_widgets()
-
-        self.device = None
-        self.participant_label = ""
-        self.expression = ""
-        self.trial_number = 1
-        self.acquisition_duration = 5  # seconds per phase
-        self.data_folder = "Data"
-        self.current_trial_label = ""
+        self.root.title("sEMG Sensing Study")
+        
+        self.participant_label = tk.StringVar()
+        self.expression_choice = tk.StringVar()
         self.is_collecting = False
-
-    def create_widgets(self):
-        # Participant Label
-        tk.Label(self.root, text="Participant Label:").grid(row=0, column=0, padx=10, pady=10)
-        self.participant_entry = tk.Entry(self.root)
-        self.participant_entry.grid(row=0, column=1, padx=10, pady=10)
-
-        # Connect to Unicorn Button
-        self.connect_button = tk.Button(self.root, text="Connect to Unicorn", command=self.connect_to_unicorn)
-        self.connect_button.grid(row=1, column=0, columnspan=2, pady=10)
-
-        # Expression Selection
-        tk.Label(self.root, text="Select Expression:").grid(row=2, column=0, padx=10, pady=10)
-        self.expression_var = tk.StringVar(value="Smile")
-        tk.Radiobutton(self.root, text="Smile", variable=self.expression_var, value="Smile").grid(row=2, column=1, sticky=tk.W)
-        tk.Radiobutton(self.root, text="Frown", variable=self.expression_var, value="Frown").grid(row=2, column=1, sticky=tk.E)
-
-        # Start Data Collection Button
-        self.start_button = tk.Button(self.root, text="Begin Data Collection", command=self.start_data_collection)
-        self.start_button.grid(row=3, column=0, columnspan=2, pady=10)
-
-        # Stop Data Collection Button
-        self.stop_button = tk.Button(self.root, text="Stop Data Collection", command=self.stop_data_collection, state=tk.DISABLED)
-        self.stop_button.grid(row=4, column=0, columnspan=2, pady=10)
-
-        # Delete Last Trial Button
-        self.delete_button = tk.Button(self.root, text="Delete Last Trial", command=self.delete_last_trial, state=tk.DISABLED)
-        self.delete_button.grid(row=5, column=0, columnspan=2, pady=10)
-
-        # Status Message
-        self.status_label = tk.Label(self.root, text="Status: Not Connected")
-        self.status_label.grid(row=6, column=0, columnspan=2, pady=10)
-
-        # Countdown Label
-        self.countdown_label = tk.Label(self.root, text="", font=("Helvetica", 24, "bold"))
-        self.countdown_label.grid(row=7, column=0, columnspan=2, pady=10)
-
+        self.trial_number = 1
+        self.device = None
+        self.output_folder = "Data"
+        self.data_file = None
+        
+        self.create_ui()
+        self.lsl_streams = self.setup_lsl_streams()
+    
+    def create_ui(self):
+        tk.Label(self.root, text="Participant Label:").grid(row=0, column=0)
+        tk.Entry(self.root, textvariable=self.participant_label).grid(row=0, column=1)
+        
+        tk.Button(self.root, text="Connect to Unicorn", command=self.connect_to_unicorn).grid(row=1, column=0, columnspan=2)
+        
+        tk.Label(self.root, text="Choose Expression:").grid(row=2, column=0)
+        tk.Radiobutton(self.root, text="Smile", variable=self.expression_choice, value="Smile").grid(row=2, column=1)
+        tk.Radiobutton(self.root, text="Frown", variable=self.expression_choice, value="Frown").grid(row=2, column=2)
+        
+        tk.Button(self.root, text="Begin Data Collection", command=self.start_data_collection).grid(row=3, column=0, columnspan=2)
+        tk.Button(self.root, text="Stop Data Collection", command=self.stop_data_collection).grid(row=4, column=0, columnspan=2)
+        tk.Button(self.root, text="Delete Last Trial", command=self.delete_last_trial).grid(row=5, column=0, columnspan=2)
+        
+        self.countdown_label = tk.Label(self.root, text="", font=("Helvetica", 16, "bold"))
+        self.countdown_label.grid(row=6, column=0, columnspan=3)
+    
+    def setup_lsl_streams(self):
+        # Create LSL stream for raw data and events
+        info_data = StreamInfo('UnicornRawData', 'EEG', 8, 250, 'float32', 'unicorn_raw_data')
+        outlet_data = StreamOutlet(info_data)
+        
+        info_event = StreamInfo('UnicornEvent', 'Markers', 1, 0, 'int32', 'unicorn_event')
+        outlet_event = StreamOutlet(info_event)
+        
+        return {'data': outlet_data, 'event': outlet_event}
+    
     def connect_to_unicorn(self):
-        # Connect to the Unicorn Hybrid Black device
         try:
-            deviceList = UnicornPy.GetAvailableDevices(True)
-            if len(deviceList) <= 0 or deviceList is None:
-                messagebox.showerror("Error", "No device available. Please pair with a Unicorn first.")
-                return
-
-            self.device = UnicornPy.Unicorn(deviceList[0])
-            self.status_label.config(text=f"Connected to {deviceList[0]}")
-            messagebox.showinfo("Success", f"Connected to {deviceList[0]}")
+            device_list = UnicornPy.GetAvailableDevices(True)
+            if not device_list:
+                raise Exception("No device available. Please pair with a Unicorn first.")
+            self.device = UnicornPy.Unicorn(device_list[0])
+            num_channels = self.device.GetNumberOfAcquiredChannels()  # Get the number of channels
+            messagebox.showinfo("Success", f"Connected to Unicorn device with {num_channels} channels.")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to connect: {e}")
-
+            messagebox.showerror("Error", str(e))
+    
     def start_data_collection(self):
-        self.participant_label = self.participant_entry.get().strip()
-        self.expression = self.expression_var.get()
-        if not self.participant_label:
-            messagebox.showerror("Error", "Please enter a participant label.")
-            return
         if not self.device:
-            messagebox.showerror("Error", "Please connect to a Unicorn device first.")
+            messagebox.showerror("Error", "Please connect to Unicorn device first.")
             return
-
-        self.trial_number = self.get_next_trial_number()
+        
+        if not self.participant_label.get():
+            messagebox.showerror("Error", "Please enter participant label.")
+            return
+        
+        if not self.expression_choice.get():
+            messagebox.showerror("Error", "Please select an expression (Smile or Frown).")
+            return
+        
         self.is_collecting = True
-
-        self.status_label.config(text="Status: Collecting Data")
-        self.start_button.config(state=tk.DISABLED)
-        self.connect_button.config(state=tk.DISABLED)
-        self.stop_button.config(state=tk.NORMAL)
-        self.delete_button.config(state=tk.NORMAL)
-
-        # Start data collection in a separate thread
-        collection_thread = Thread(target=self.collect_data)
-        collection_thread.start()
-
-    def get_next_trial_number(self):
-        participant_folder = os.path.join(self.data_folder, self.participant_label)
-        if not os.path.exists(participant_folder):
-            return 1
-        existing_files = os.listdir(participant_folder)
-        trial_numbers = [int(f.split('_')[-1].split('.')[0]) for f in existing_files if f.startswith(f"{self.participant_label}_{self.expression}_")]
-        if not trial_numbers:
-            return 1
-        return max(trial_numbers) + 1
-
-    def collect_data(self):
-        participant_folder = os.path.join(self.data_folder, self.participant_label)
-        os.makedirs(participant_folder, exist_ok=True)
-
-        try:
-            # Create LSL streams
-            info_unicorn = pylsl.StreamInfo('Unicorn', 'EEG', self.device.GetNumberOfAcquiredChannels(), UnicornPy.SamplingRate, 'float32', 'unicorn12345')
-            info_event = pylsl.StreamInfo('Event', 'Markers', 2, 0, 'int32', 'event12345')
-            outlet_unicorn = pylsl.StreamOutlet(info_unicorn)
-            outlet_event = pylsl.StreamOutlet(info_event)
-
-            # Collect data for a single trial
-            self.current_trial_label = f"{self.participant_label}_{self.expression}_{self.trial_number}"
-            data_file = os.path.join(participant_folder, f"{self.current_trial_label}.csv")
-            self.device.StartAcquisition(False)
-
-            phases = [
-                ("Neutral", [0, 0]),
-                ("100%", [3, 0] if self.expression == "Frown" else [0, 3]),
-                ("Neutral", [0, 0]),
-                ("60%", [2, 0] if self.expression == "Frown" else [0, 2]),
-                ("Neutral", [0, 0]),
-                ("30%", [1, 0] if self.expression == "Frown" else [0, 1]),
-                ("Neutral", [0, 0])
-            ]
-
-            # Start a thread to write data to a file
-            data_thread = Thread(target=self.write_data_to_file, args=(data_file, outlet_unicorn, outlet_event, phases))
-            data_thread.start()
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Data collection failed: {e}")
-
-    def write_data_to_file(self, data_file, outlet_unicorn, outlet_event, phases):
-        try:
-            with open(data_file, "w") as file:
-                numberOfAcquiredChannels = self.device.GetNumberOfAcquiredChannels()
-                receiveBufferBufferLength = 1 * numberOfAcquiredChannels * 4
-                receiveBuffer = bytearray(receiveBufferBufferLength)
-
-                for phase, event_code in phases:
-                    if not self.is_collecting:
-                        break
-                    self.status_label.config(text=f"Status: {phase}")
-                    self.root.update()
-                    self.countdown(5)
-
-                    start_time = time.time()
-                    while time.time() - start_time < self.acquisition_duration:
-                        self.device.GetData(1, receiveBuffer, receiveBufferBufferLength)
-                        data = np.frombuffer(receiveBuffer, dtype=np.float32, count=numberOfAcquiredChannels)
-                        np.savetxt(file, [data], delimiter=',', fmt='%.3f', newline='\n')
-
-                        # Push data to LSL streams
-                        outlet_unicorn.push_sample(data.tolist())
-                        outlet_event.push_sample(event_code)
-
-                self.device.StopAcquisition()
-                self.status_label.config(text="Status: Data Collection Completed")
-                self.start_button.config(state=tk.NORMAL)
-                self.connect_button.config(state=tk.NORMAL)
-                self.stop_button.config(state=tk.DISABLED)
-                self.delete_button.config(state=tk.DISABLED)
-                self.is_collecting = False
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Error during data streaming: {e}")
-
-    def countdown(self, duration):
-        try:
-            for i in range(duration, 0, -1):
-                self.countdown_label.config(text=str(i))
-                self.root.update()
-                time.sleep(1)
-            self.countdown_label.config(text="")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error during countdown: {e}")
-
+        self.trial_number = self.get_next_trial_number()
+        threading.Thread(target=self.collect_data).start()
+    
     def stop_data_collection(self):
         self.is_collecting = False
-
+    
     def delete_last_trial(self):
-        if not self.current_trial_label:
-            messagebox.showerror("Error", "No trial to delete.")
-            return
-        participant_folder = os.path.join(self.data_folder, self.participant_label)
-        last_trial_file = os.path.join(participant_folder, f"{self.current_trial_label}.csv")
-        if os.path.exists(last_trial_file):
+        last_trial_file = self.get_last_trial_file()
+        if last_trial_file:
             os.remove(last_trial_file)
-            self.status_label.config(text=f"Deleted last trial: {self.current_trial_label}")
-        else:
-            messagebox.showerror("Error", "Last trial file not found.")
+            messagebox.showinfo("Success", f"Deleted {last_trial_file}")
+    
+    def get_next_trial_number(self):
+        label = self.participant_label.get()
+        expression = self.expression_choice.get()
+        folder_path = os.path.join(self.output_folder, label)
+        os.makedirs(folder_path, exist_ok=True)
+        existing_files = [f for f in os.listdir(folder_path) if f.startswith(f"{label}_{expression}")]
+        return len(existing_files) + 1
+    
+    def get_last_trial_file(self):
+        label = self.participant_label.get()
+        expression = self.expression_choice.get()
+        folder_path = os.path.join(self.output_folder, label)
+        existing_files = sorted([f for f in os.listdir(folder_path) if f.startswith(f"{label}_{expression}")])
+        if existing_files:
+            return os.path.join(folder_path, existing_files[-1])
+        return None
+    
+    def collect_data(self):
+        label = self.participant_label.get()
+        expression = self.expression_choice.get()
+        trial_number = self.trial_number
+        file_path = os.path.join(self.output_folder, label, f"{label}_{expression}_{trial_number:02d}.csv")
+        
+        FrameLength = 1
+        AcquisitionDurationInSeconds = 35  # Total duration for the steps
+        
+        self.data_file = open(file_path, "wb")
+        number_of_acquired_channels = self.device.GetNumberOfAcquiredChannels()
+        receive_buffer_buffer_length = FrameLength * number_of_acquired_channels * 4
+        receive_buffer = bytearray(receive_buffer_buffer_length)
+        
+        try:
+            self.device.StartAcquisition(False)
+            print("Data acquisition started.")
+            
+            steps = [
+                (5, "Neutral", 0),
+                (5, "Strong Expression", 3 if expression == "Frown" else 6),
+                (5, "Neutral", 0),
+                (5, "Medium Expression", 2 if expression == "Frown" else 5),
+                (5, "Neutral", 0),
+                (5, "Weak Expression", 1 if expression == "Frown" else 4),
+                (5, "Neutral", 0)
+            ]
+            
+            for duration, description, event_code in steps:
+                if not self.is_collecting:
+                    break
+                
+                for sec in range(duration, 0, -1):
+                    self.update_countdown(f"{description} in {sec} seconds")
+                    time.sleep(1)
+                
+                self.update_countdown(description)
+                start_time = time.time()
+                while time.time() - start_time < duration:
+                    self.device.GetData(FrameLength, receive_buffer, receive_buffer_buffer_length)
+                    data = np.frombuffer(receive_buffer, dtype=np.float32, count=number_of_acquired_channels * FrameLength)
+                    data = np.reshape(data, (FrameLength, number_of_acquired_channels))
+                    np.savetxt(self.data_file, data, delimiter=',', fmt='%.3f', newline='\n')
+                    self.lsl_streams['data'].push_chunk(data.tolist())
+                    self.lsl_streams['event'].push_sample([event_code])
+                
+                if not self.is_collecting:
+                    break
+            
+            self.update_countdown("Data collection completed")
+        except Exception as e:
+            print(f"Error during data collection: {e}")
+        finally:
+            self.device.StopAcquisition()
+            self.data_file.close()
+            del receive_buffer
+    
+    def update_countdown(self, text):
+        self.countdown_label.config(text=text)
+    
+    def on_closing(self):
+        if self.device:
+            self.device.StopAcquisition()
+            del self.device
+        self.root.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = SEMGApp(root)
+    app = SEMGStudyApp(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
