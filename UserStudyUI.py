@@ -43,7 +43,8 @@ class SEMGStudyApp:
     
     def setup_lsl_streams(self):
         # Create LSL stream for raw data and events
-        info_data = StreamInfo('UnicornRawData', 'EEG', 8, 250, 'float32', 'unicorn_raw_data')
+        number_of_acquired_channels = self.device.GetNumberOfAcquiredChannels()
+        info_data = StreamInfo('UnicornRawData', 'EEG', number_of_acquired_channels, 250, 'float32', 'unicorn_raw_data')
         outlet_data = StreamOutlet(info_data)
         
         info_event = StreamInfo('UnicornEvent', 'Markers', 1, 0, 'int32', 'unicorn_event')
