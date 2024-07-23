@@ -43,8 +43,7 @@ class SEMGStudyApp:
     
     def setup_lsl_streams(self):
         # Create LSL stream for raw data and events
-        number_of_acquired_channels = self.device.GetNumberOfAcquiredChannels()
-        info_data = StreamInfo('UnicornRawData', 'EEG', number_of_acquired_channels, 250, 'float32', 'unicorn_raw_data')
+        info_data = StreamInfo('UnicornRawData', 'EEG', 17, 250, 'float32', 'unicorn_raw_data')
         outlet_data = StreamOutlet(info_data)
         
         info_event = StreamInfo('UnicornEvent', 'Markers', 1, 0, 'int32', 'unicorn_event')
@@ -117,7 +116,9 @@ class SEMGStudyApp:
         
         self.data_file = open(file_path, "wb")
         number_of_acquired_channels = self.device.GetNumberOfAcquiredChannels()
+        print(number_of_acquired_channels)
         receive_buffer_buffer_length = FrameLength * number_of_acquired_channels * 4
+        print(receive_buffer_buffer_length)
         receive_buffer = bytearray(receive_buffer_buffer_length)
         
         try:
@@ -145,10 +146,13 @@ class SEMGStudyApp:
                 self.update_countdown(description)
                 start_time = time.time()
                 while time.time() - start_time < duration:
+                    print("Starting data collection...")
                     self.device.GetData(FrameLength, receive_buffer, receive_buffer_buffer_length)
+                    print("Reading data from buffer...")
                     data = np.frombuffer(receive_buffer, dtype=np.float32, count=number_of_acquired_channels * FrameLength)
                     data = np.reshape(data, (FrameLength, number_of_acquired_channels))
                     np.savetxt(self.data_file, data, delimiter=',', fmt='%.3f', newline='\n')
+
                     self.lsl_streams['data'].push_chunk(data.tolist())
                     self.lsl_streams['event'].push_sample([event_code])
                 
