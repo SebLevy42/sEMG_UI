@@ -17,14 +17,36 @@ class DataCollectionApp:
             ("Medium Expression", 5, "60%", 2),
             ("Relax Face", 5, "Neutral", 0),
             ("Weak Expression", 5, "30%", 1),
-            ("Relax Face", 5, "Neutral", 0)
+            ("Relax Face", 10, "Neutral", 0),
+            ("Strong Expression", 5, "100%", 3),
+            ("Relax Face", 5, "Neutral", 0),
+            ("Medium Expression", 5, "60%", 2),
+            ("Relax Face", 5, "Neutral", 0),
+            ("Weak Expression", 5, "30%", 1),
+            ("Relax Face", 10, "Neutral", 0),
+            ("Strong Expression", 5, "100%", 3),
+            ("Relax Face", 5, "Neutral", 0),
+            ("Medium Expression", 5, "60%", 2),
+            ("Relax Face", 5, "Neutral", 0),
+            ("Weak Expression", 5, "30%", 1),
+            ("Relax Face", 10, "Neutral", 0),
+            ("Strong Expression", 5, "100%", 3),
+            ("Relax Face", 5, "Neutral", 0),
+            ("Medium Expression", 5, "60%", 2),
+            ("Relax Face", 5, "Neutral", 0),
+            ("Weak Expression", 5, "30%", 1),
+            ("Relax Face", 10, "Neutral", 0),
+            ("Strong Expression", 5, "100%", 3),
+            ("Relax Face", 5, "Neutral", 0),
+            ("Medium Expression", 5, "60%", 2),
+            ("Relax Face", 5, "Neutral", 0),
+            ("Weak Expression", 5, "30%", 1)
         ]
         self.current_instruction = 0
         self.device = None
         self.file = None
         self.label = None
         self.expression_type = tk.StringVar(value="Smile")
-        self.event = 0
 
         self.create_widgets()
         self.setup_device()
@@ -70,11 +92,11 @@ class DataCollectionApp:
             self.root.quit()
 
     def setup_lsl(self):
-        self.data_info = StreamInfo('UnicornData', 'EEG', 18, UnicornPy.SamplingRate, 'float32', 'Unicorn')
-        self.event_info = StreamInfo('UnicornEvents', 'Markers', 1, 0, 'int32', 'Event')
+        self.data_info = StreamInfo('UnicornData', 'EEG', 18, UnicornPy.SamplingRate, 'float32', 'unicorn12345')
+        #self.event_info = StreamInfo('UnicornEvents', 'Markers', 1, 0, 'int32', 'unicorn_events12345')
         
         self.data_outlet = StreamOutlet(self.data_info)
-        self.event_outlet = StreamOutlet(self.event_info)
+        #self.event_outlet = StreamOutlet(self.event_info)
 
     def start_data_collection(self):
         self.participant_label = self.label_entry.get().strip()
@@ -109,8 +131,8 @@ class DataCollectionApp:
                 event_code += 3 if self.expression_type.get() == "Frown" else 0
             else:
                 expression_mod = instruction
-            self.label.config(text=f"Prepare for: {expression_mod} ({expression}) - Code: {event_code}")
-            self.root.after(1000, self.countdown, duration, expression_mod, expression, event_code)
+            self.label.config(text=f"Prepare for: {expression_mod} ({expression})")
+            self.root.after(5000, self.countdown, duration, expression_mod, expression, event_code)
         else:
             self.stop_data_collection()
 
@@ -120,10 +142,9 @@ class DataCollectionApp:
             self.root.update()
             self.root.after(1000)
         self.label.config(text=f"{instruction} ({expression}) for {duration} seconds")
-        self.event_outlet.push_sample([event_code])
+        #self.event_outlet.push_sample([event_code])
         self.root.after(duration * 1000, self.collect_data(event_code))
         self.current_instruction += 1
-        self.event += 1
 
     def collect_data(self, event_code):
         FrameLength = 1
@@ -135,13 +156,12 @@ class DataCollectionApp:
             self.device.StartAcquisition(False)
             
             for _ in range(5 * UnicornPy.SamplingRate // FrameLength):
-                print(event_code)
                 self.device.GetData(FrameLength, receiveBuffer, receiveBufferBufferLength)
-                data = np.frombuffer(receiveBuffer, dtype=np.float32, count=numberOfAcquiredChannels * FrameLength).append(event_code.astype(np.float))
-                data = np.reshape(data, (FrameLength, numberOfAcquiredChannels))
+                data = np.frombuffer(receiveBuffer, dtype=np.float32, count=numberOfAcquiredChannels * FrameLength)
+                data = np.append(data, np.float32(event_code))
+                data = np.reshape(data, (FrameLength, numberOfAcquiredChannels+1))
                 np.savetxt(self.file, data, delimiter=',', fmt='%.3f', newline='\n')
                 self.data_outlet.push_chunk(data.tolist())
-
             
             self.device.StopAcquisition()
 
@@ -149,8 +169,6 @@ class DataCollectionApp:
             messagebox.showerror("Device Error", str(e))
         except Exception as e:
             messagebox.showerror("Error", str(e))
-        #finally:
-            #self.file.close()
 
         self.show_next_instruction()
 
